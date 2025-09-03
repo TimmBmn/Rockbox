@@ -2231,7 +2231,7 @@ static void db_log(const char *prefix, const char *msg)
  * idea, as it uses lots of stack and is called from a recursive function
  * (check_dir).
  */
-static void NO_INLINE add_tagcache(char *path, unsigned long mtime)
+static void NO_INLINE add_tagcache(char *path, unsigned long mtime, char *artist)
 {
     #define ADD_TAG(entry, tag, data) \
         /* Adding tag */                              \
@@ -2319,6 +2319,7 @@ static void NO_INLINE add_tagcache(char *path, unsigned long mtime)
         DB_LOG("error", "get_metadata failed");
         return ;
     }
+    id3.artist = artist;
 
     logf("-> %s", path);
 
@@ -4954,8 +4955,23 @@ static bool check_dir(const char *dirname, int add_files)
         {
             tc_stat.curentry = curpath;
 
-            /* Add a new entry to the temporary db file. */
-            add_tagcache(curpath, info.mtime);
+            struct mp3entry id3;
+            bool ret;
+            ret = get_metadata_ex(&id3, -1, curpath, METADATA_EXCLUDE_ID3_PATH);
+            if (!ret) {
+                tc_stat.curentry = NULL;
+                DEBUGF("Error: could not read metadata");
+                // not sure if this could result in an infinite loop
+                continue;
+            }
+
+            char *rest = id3.artist;
+            char *artist;
+            while ((artist = strtok_r(rest, ",", &rest))) {
+                if (artist[0] == ' ') artist++;
+                /* Add a new entry to the temporary db file. */
+                add_tagcache(curpath, info.mtime, artist);
+            }
 
             /* Wait until current path for debug screen is read and unset. */
             while (tc_stat.syncscreen && tc_stat.curentry != NULL)
