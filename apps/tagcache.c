@@ -2231,7 +2231,7 @@ static void db_log(const char *prefix, const char *msg)
  * idea, as it uses lots of stack and is called from a recursive function
  * (check_dir).
  */
-static void NO_INLINE add_tagcache(char *path, unsigned long mtime, char *artist)
+static void NO_INLINE add_tagcache(char *path, unsigned long mtime, char *artist, bool first_artist)
 {
     #define ADD_TAG(entry, tag, data) \
         /* Adding tag */                              \
@@ -2319,7 +2319,19 @@ static void NO_INLINE add_tagcache(char *path, unsigned long mtime, char *artist
         DB_LOG("error", "get_metadata failed");
         return ;
     }
+
     id3.artist = artist;
+    // clear ever other value so that there are no duplicate entries in the database
+    if (!first_artist) {
+        id3.tracknum = -1;
+        id3.year = 0;
+        id3.discnum = 0;
+        id3.album = NULL;
+        id3.genre_string = NULL;
+        id3.composer = NULL;
+        id3.albumartist = NULL;
+        id3.grouping = NULL;
+    };
 
     logf("-> %s", path);
 
@@ -4967,10 +4979,12 @@ static bool check_dir(const char *dirname, int add_files)
 
             char *rest = id3.artist;
             char *artist;
+            bool first_artist = true;
             while ((artist = strtok_r(rest, ",", &rest))) {
                 if (artist[0] == ' ') artist++;
                 /* Add a new entry to the temporary db file. */
-                add_tagcache(curpath, info.mtime, artist);
+                add_tagcache(curpath, info.mtime, artist, first_artist);
+                first_artist = false;
             }
 
             /* Wait until current path for debug screen is read and unset. */
