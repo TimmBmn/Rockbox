@@ -401,6 +401,7 @@ static int get_tag(int *tag)
         TAG_MATCH("%menu_start", var_menu_start) \
         TAG_MATCH("%byfirstletter", menu_byfirstletter) \
         TAG_MATCH("canonicalartist", tag_virt_canonicalartist) \
+        TAG_MATCH("importantartist", tag_importantartist) \
     /* END OF TAG_TABLE MACRO */
 
     /* build two separate arrays tag strings and symbol map*/

@@ -244,6 +244,7 @@ struct mp3entry {
     char* comment;
     char* albumartist;
     char* grouping;
+    char* important_artist;
     int discnum;
     int tracknum;
     int layer;

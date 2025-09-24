@@ -2207,7 +2207,7 @@ static int check_if_empty(char **tag)
  * idea, as it uses lots of stack and is called from a recursive function
  * (check_dir).
  */
-static void NO_INLINE add_tagcache(char *path, unsigned long mtime)
+static void NO_INLINE add_tagcache(char *path, unsigned long mtime, struct mp3entry* id3)
 {
     #define ADD_TAG(entry, tag, data) \
         /* Adding tag */                              \
@@ -2215,9 +2215,7 @@ static void NO_INLINE add_tagcache(char *path, unsigned long mtime)
         entry.tag_offset[tag] = offset;               \
         offset += entry.tag_length[tag]
 
-    struct mp3entry id3;
     struct temp_file_entry entry;
-    bool ret;
     int idx_id = -1;
     char tracknumfix[3];
     int offset = 0;
@@ -2290,61 +2288,54 @@ static void NO_INLINE add_tagcache(char *path, unsigned long mtime)
         }
     }
 
-    /*memset(&id3, 0, sizeof(struct mp3entry)); -- get_metadata does this for us */
     memset(&entry, 0, sizeof(struct temp_file_entry));
     memset(&tracknumfix, 0, sizeof(tracknumfix));
-    ret = get_metadata_ex(&id3, -1, path, METADATA_EXCLUDE_ID3_PATH);
-
-    if (!ret)
-    {
-        logf("get_metadata fail: %s", path);
-        return ;
-    }
 
     logf("-> %s", path);
 
-    if (id3.tracknum <= 0)              /* Track number missing? */
+    if (id3->tracknum <= 0)              /* Track number missing? */
     {
-        id3.tracknum = -1;
+        id3->tracknum = -1;
     }
 
     /* Numeric tags */
-    entry.tag_offset[tag_year] = id3.year;
-    entry.tag_offset[tag_discnumber] = id3.discnum;
-    entry.tag_offset[tag_tracknumber] = id3.tracknum;
-    entry.tag_offset[tag_length] = id3.length;
-    entry.tag_offset[tag_bitrate] = id3.bitrate;
+    entry.tag_offset[tag_year] = id3->year;
+    entry.tag_offset[tag_discnumber] = id3->discnum;
+    entry.tag_offset[tag_tracknumber] = id3->tracknum;
+    entry.tag_offset[tag_length] = id3->length;
+    entry.tag_offset[tag_bitrate] = id3->bitrate;
     entry.tag_offset[tag_mtime] = mtime;
 
     /* String tags. */
-    has_artist = id3.artist != NULL
-        && strlen(id3.artist) > 0;
-    has_grouping = id3.grouping != NULL
-        && strlen(id3.grouping) > 0;
+    has_artist = id3->artist != NULL
+        && strlen(id3->artist) > 0;
+    has_grouping = id3->grouping != NULL
+        && strlen(id3->grouping) > 0;
 
     ADD_TAG(entry, tag_filename, &path);
-    ADD_TAG(entry, tag_title, &id3.title);
-    ADD_TAG(entry, tag_artist, &id3.artist);
-    ADD_TAG(entry, tag_album, &id3.album);
-    ADD_TAG(entry, tag_genre, &id3.genre_string);
-    ADD_TAG(entry, tag_composer, &id3.composer);
-    ADD_TAG(entry, tag_comment, &id3.comment);
-    ADD_TAG(entry, tag_albumartist, &id3.albumartist);
+    ADD_TAG(entry, tag_title, &id3->title);
+    ADD_TAG(entry, tag_artist, &id3->artist);
+    ADD_TAG(entry, tag_album, &id3->album);
+    ADD_TAG(entry, tag_genre, &id3->genre_string);
+    ADD_TAG(entry, tag_composer, &id3->composer);
+    ADD_TAG(entry, tag_comment, &id3->comment);
+    ADD_TAG(entry, tag_albumartist, &id3->albumartist);
+    ADD_TAG(entry, tag_importantartist, &id3->important_artist);
     if (has_artist)
     {
-        ADD_TAG(entry, tag_virt_canonicalartist, &id3.artist);
+        ADD_TAG(entry, tag_virt_canonicalartist, &id3->artist);
     }
     else
     {
-        ADD_TAG(entry, tag_virt_canonicalartist, &id3.albumartist);
+        ADD_TAG(entry, tag_virt_canonicalartist, &id3->albumartist);
     }
     if (has_grouping)
     {
-        ADD_TAG(entry, tag_grouping, &id3.grouping);
+        ADD_TAG(entry, tag_grouping, &id3->grouping);
     }
     else
     {
-        ADD_TAG(entry, tag_grouping, &id3.title);
+        ADD_TAG(entry, tag_grouping, &id3->title);
     }
     entry.data_length = offset;
 
@@ -2353,28 +2344,29 @@ static void NO_INLINE add_tagcache(char *path, unsigned long mtime)
 
     /* And tags also... Correct order is critical */
     write_item(path);
-    write_item(id3.title);
-    write_item(id3.artist);
-    write_item(id3.album);
-    write_item(id3.genre_string);
-    write_item(id3.composer);
-    write_item(id3.comment);
-    write_item(id3.albumartist);
+    write_item(id3->title);
+    write_item(id3->artist);
+    write_item(id3->album);
+    write_item(id3->genre_string);
+    write_item(id3->composer);
+    write_item(id3->comment);
+    write_item(id3->albumartist);
+    write_item(id3->important_artist);
     if (has_artist)
     {
-        write_item(id3.artist);
+        write_item(id3->artist);
     }
     else
     {
-        write_item(id3.albumartist);
+        write_item(id3->albumartist);
     }
     if (has_grouping)
     {
-        write_item(id3.grouping);
+        write_item(id3->grouping);
     }
     else
     {
-        write_item(id3.title);
+        write_item(id3->title);
     }
 
     total_entry_count++;
@@ -4882,7 +4874,26 @@ static int free_search_roots(struct search_roots_ll * start)
 #define free_search_roots(a) do {} while(0)
 #endif
 
-static bool check_dir(const char *dirname, int add_files)
+bool is_important_artist(char *artist, FILE *fptr)
+{
+    if(fptr != NULL)
+    {
+        char file_artist[256];
+        while(fgets(file_artist, 256, fptr))
+        {
+            /* remove \n character */
+            file_artist[strlen(file_artist)-1] = '\0';
+            debugf("was geht warum ist \"%s\" und \"%s\" nicht gleich\n", file_artist, artist);
+            if (strcmp(artist, file_artist) == 0)
+                return true;
+        }
+        rewind(fptr);
+    }
+
+    return false;
+}
+
+static bool check_dir(const char *dirname, int add_files, FILE *fptr)
 {
     int success = false;
 
@@ -4929,14 +4940,50 @@ static bool check_dir(const char *dirname, int add_files)
                 add_search_root(curpath);
             else
 #endif /* SIMULATOR */
-                check_dir(curpath, add_files);
+                check_dir(curpath, add_files, fptr);
         }
         else if (add_files)
         {
             tc_stat.curentry = curpath;
 
-            /* Add a new entry to the temporary db file. */
-            add_tagcache(curpath, info.mtime);
+            struct mp3entry id3;
+            bool ret;
+            ret = get_metadata_ex(&id3, -1, curpath, METADATA_EXCLUDE_ID3_PATH);
+            if (!ret)
+            {
+                logf("get_metadata fail: %s", curpath);
+                continue;
+            }
+
+            char *all_artists = id3.artist;
+            char *current_artist;
+            bool first_artist = true;
+
+            while ((current_artist = strtok_r(all_artists, ",", &all_artists)))
+            {
+                if (current_artist[0] == ' ')
+                    current_artist++;
+                id3.artist = current_artist;
+                id3.important_artist = is_important_artist(current_artist, fptr) ? "y" : "n";
+                // debugf("hallo ich bin %s und hab den wert %s\n", id3.artist, id3.important_artist);
+
+                if (!first_artist)
+                {
+                    id3.tracknum = -1;
+                    id3.year = 0;
+                    id3.discnum = 0;
+                    id3.album = NULL;
+                    id3.genre_string = NULL;
+                    id3.composer = NULL;
+                    id3.albumartist = NULL;
+                    id3.grouping = NULL;
+                }
+
+                /* Add a new entry to the temporary db file. */
+                add_tagcache(curpath, info.mtime, &id3);
+
+                first_artist = false;
+            }
 
             /* Wait until current path for debug screen is read and unset. */
             while (tc_stat.syncscreen && tc_stat.curentry != NULL)
@@ -4961,6 +5008,48 @@ void tagcache_screensync_event(void)
 void tagcache_screensync_enable(bool state)
 {
     tc_stat.syncscreen = state;
+}
+
+void recursive_important_artist_search(FILE *fptr, const char *path)
+{
+    DIR *dir = opendir(path);
+    if (!dir)
+    {
+        return;
+    }
+
+    struct dirent *entry;
+    while ((entry = readdir (dir)) != NULL)
+    {
+        /* check if file is the . or .. directory or the .rockbox directory */
+        if (is_dotdir_name(entry->d_name) || strcmp(entry->d_name, ".rockbox") == 0)
+            continue;
+
+        struct dirinfo info = dir_get_info(dir, entry);
+
+        /* create full_path to the file/directory */
+        char full_path[TAGCACHE_BUFSZ];
+        strmemccpy(full_path, path, sizeof(full_path));
+        size_t len = strlen(curpath);
+        path_append(full_path, PA_SEP_HARD, entry->d_name, sizeof(full_path) - len);
+
+        /* start recursion if current path is a directory */
+        if (info.attribute & ATTR_DIRECTORY)
+        {
+            recursive_important_artist_search(fptr, full_path);
+            continue;
+        }
+
+        struct mp3entry id3;
+        bool ret = get_metadata_ex(&id3, -1, full_path, METADATA_EXCLUDE_ID3_PATH);
+        if (!ret)
+            continue;
+
+        char* first_artist = strtok_r(id3.artist, ",", &id3.artist);
+        fprintf(fptr, "%s\n", first_artist);
+    }
+
+    closedir(dir);
 }
 
 #ifndef __PCTOOL__
@@ -5070,13 +5159,30 @@ void do_tagcache_build(const char *path[])
     }
 
     struct search_roots_ll * this;
+
+    /* build file with important artists */
+    FILE *fptr;
+    /* create and/or reset file */
+    fptr = fopen("important_artists.txt", "w");
+    fclose(fptr);
+    fptr = fopen("important_artists.txt", "a");
+    for(this = &roots_ll[0]; this; this = this->next)
+    {
+        logf("important artists search root %s", this->path);
+        recursive_important_artist_search(fptr, this->path);
+    }
+    fclose(fptr);
+
+    /* open file to read */
+    fptr = fopen("important_artists.txt", "r");
     /* check_dir might add new roots */
     for(this = &roots_ll[0]; this; this = this->next)
     {
         logf("Search root %s", this->path);
         strmemccpy(curpath, this->path, sizeof(curpath));
-        ret = ret && check_dir(this->path, true);
+        ret = ret && check_dir(this->path, true, fptr);
     }
+    fclose(fptr);
     free_search_roots(&roots_ll[0]);
 
     /* Write the header. */
