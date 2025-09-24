@@ -104,6 +104,8 @@
  *
  * Adds around 0.5-1.0k of code.
  */
+#define IMPORTANT_ARTIST_FILE "/.rockbox/important_artists.txt"
+
 #define TAGCACHE_SUPPORT_FOREIGN_ENDIAN
 
 /* Allow a little drift to the filename ordering (should not be too high/low). */
@@ -4874,26 +4876,29 @@ static int free_search_roots(struct search_roots_ll * start)
 #define free_search_roots(a) do {} while(0)
 #endif
 
-bool is_important_artist(char *artist, FILE *fptr)
+bool is_important_artist(char *artist)
 {
-    if(fptr != NULL)
+    char file_artist[256];
+
+    int fd = open_utf8(IMPORTANT_ARTIST_FILE, O_RDONLY);
+    if (fd < 0)
+        logf("Could not open important_artists.txt file. Error: %i\n", fd);
+
+    while(read_line(fd, file_artist, sizeof(file_artist)) > 0)
     {
-        char file_artist[256];
-        while(fgets(file_artist, 256, fptr))
+        if (strcmp(artist, file_artist) == 0)
         {
-            /* remove \n character */
-            file_artist[strlen(file_artist)-1] = '\0';
-            debugf("was geht warum ist \"%s\" und \"%s\" nicht gleich\n", file_artist, artist);
-            if (strcmp(artist, file_artist) == 0)
-                return true;
+            close(fd);
+            return true;
         }
-        rewind(fptr);
     }
+
+    close(fd);
 
     return false;
 }
 
-static bool check_dir(const char *dirname, int add_files, FILE *fptr)
+static bool check_dir(const char *dirname, int add_files)
 {
     int success = false;
 
@@ -4940,7 +4945,7 @@ static bool check_dir(const char *dirname, int add_files, FILE *fptr)
                 add_search_root(curpath);
             else
 #endif /* SIMULATOR */
-                check_dir(curpath, add_files, fptr);
+                check_dir(curpath, add_files);
         }
         else if (add_files)
         {
@@ -4964,7 +4969,7 @@ static bool check_dir(const char *dirname, int add_files, FILE *fptr)
                 if (current_artist[0] == ' ')
                     current_artist++;
                 id3.artist = current_artist;
-                id3.important_artist = is_important_artist(current_artist, fptr) ? "y" : "n";
+                id3.important_artist = is_important_artist(current_artist) ? "y" : "n";
                 // debugf("hallo ich bin %s und hab den wert %s\n", id3.artist, id3.important_artist);
 
                 if (!first_artist)
@@ -5010,7 +5015,7 @@ void tagcache_screensync_enable(bool state)
     tc_stat.syncscreen = state;
 }
 
-void recursive_important_artist_search(FILE *fptr, const char *path)
+void recursive_important_artist_search(int fd, const char *path)
 {
     DIR *dir = opendir(path);
     if (!dir)
@@ -5021,8 +5026,8 @@ void recursive_important_artist_search(FILE *fptr, const char *path)
     struct dirent *entry;
     while ((entry = readdir (dir)) != NULL)
     {
-        /* check if file is the . or .. directory or the .rockbox directory */
-        if (is_dotdir_name(entry->d_name) || strcmp(entry->d_name, ".rockbox") == 0)
+        /* check if file is the . or .. directory or a hidden directory */
+        if (strncmp(entry->d_name, ".", strlen(".")) == 0)
             continue;
 
         struct dirinfo info = dir_get_info(dir, entry);
@@ -5036,7 +5041,7 @@ void recursive_important_artist_search(FILE *fptr, const char *path)
         /* start recursion if current path is a directory */
         if (info.attribute & ATTR_DIRECTORY)
         {
-            recursive_important_artist_search(fptr, full_path);
+            recursive_important_artist_search(fd, full_path);
             continue;
         }
 
@@ -5046,7 +5051,9 @@ void recursive_important_artist_search(FILE *fptr, const char *path)
             continue;
 
         char* first_artist = strtok_r(id3.artist, ",", &id3.artist);
-        fprintf(fptr, "%s\n", first_artist);
+        int result = fdprintf(fd, "%s\n", first_artist);
+        if (!result)
+            logf("Could not append an artists to important_artists.txt file\n");
     }
 
     closedir(dir);
@@ -5161,28 +5168,22 @@ void do_tagcache_build(const char *path[])
     struct search_roots_ll * this;
 
     /* build file with important artists */
-    FILE *fptr;
-    /* create and/or reset file */
-    fptr = fopen("important_artists.txt", "w");
-    fclose(fptr);
-    fptr = fopen("important_artists.txt", "a");
+    int fd = open_utf8(IMPORTANT_ARTIST_FILE, O_CREAT|O_WRONLY|O_TRUNC);
     for(this = &roots_ll[0]; this; this = this->next)
     {
         logf("important artists search root %s", this->path);
-        recursive_important_artist_search(fptr, this->path);
+        recursive_important_artist_search(fd, this->path);
     }
-    fclose(fptr);
+    close(fd);
 
     /* open file to read */
-    fptr = fopen("important_artists.txt", "r");
     /* check_dir might add new roots */
     for(this = &roots_ll[0]; this; this = this->next)
     {
         logf("Search root %s", this->path);
         strmemccpy(curpath, this->path, sizeof(curpath));
-        ret = ret && check_dir(this->path, true, fptr);
+        ret = ret && check_dir(this->path, true);
     }
-    fclose(fptr);
     free_search_roots(&roots_ll[0]);
 
     /* Write the header. */
