@@ -105,6 +105,7 @@
  * Adds around 0.5-1.0k of code.
  */
 #define IMPORTANT_ARTIST_FILE "/.rockbox/important_artists.txt"
+#define IMPORTANT_ARTIST_THRESHOLD 5
 
 #define TAGCACHE_SUPPORT_FOREIGN_ENDIAN
 
@@ -4879,6 +4880,7 @@ static int free_search_roots(struct search_roots_ll * start)
 bool is_important_artist(char *artist)
 {
     char file_artist[256];
+    int count = 0;
 
     int fd = open_utf8(IMPORTANT_ARTIST_FILE, O_RDONLY);
     if (fd < 0)
@@ -4888,14 +4890,13 @@ bool is_important_artist(char *artist)
     {
         if (strcmp(artist, file_artist) == 0)
         {
-            close(fd);
-            return true;
+            count++;
         }
     }
 
     close(fd);
 
-    return false;
+    return count >= IMPORTANT_ARTIST_THRESHOLD;
 }
 
 static bool check_dir(const char *dirname, int add_files)
