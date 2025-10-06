@@ -4958,6 +4958,7 @@ static bool check_dir(const char *dirname, int add_files)
             if (!ret)
             {
                 logf("get_metadata fail: %s", curpath);
+                goto path_finished;
                 continue;
             }
 
@@ -4971,7 +4972,6 @@ static bool check_dir(const char *dirname, int add_files)
                     current_artist++;
                 id3.artist = current_artist;
                 id3.important_artist = is_important_artist(current_artist) ? "y" : "n";
-                // debugf("hallo ich bin %s und hab den wert %s\n", id3.artist, id3.important_artist);
 
                 if (!first_artist)
                 {
@@ -4998,6 +4998,7 @@ static bool check_dir(const char *dirname, int add_files)
             tc_stat.curentry = NULL;
         }
 
+        path_finished:
         str_setlen(curpath, len);
     }
 
