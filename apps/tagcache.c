@@ -4899,7 +4899,7 @@ bool is_important_artist(char *artist)
     return count >= IMPORTANT_ARTIST_THRESHOLD;
 }
 
-static bool check_dir(const char *dirname, int add_files)
+static bool check_dir(const char *dirname, int add_files, int important_artist_fd)
 {
     int success = false;
 
@@ -4946,7 +4946,7 @@ static bool check_dir(const char *dirname, int add_files)
                 add_search_root(curpath);
             else
 #endif /* SIMULATOR */
-                check_dir(curpath, add_files);
+                check_dir(curpath, add_files, important_artist_fd);
         }
         else if (add_files)
         {
@@ -4962,33 +4962,40 @@ static bool check_dir(const char *dirname, int add_files)
                 continue;
             }
 
-            char *all_artists = id3.artist;
-            char *current_artist;
-            bool first_artist = true;
+            if (important_artist_fd) {
+                char* first_artist = strtok_r(id3.artist, ",", &id3.artist);
+                int result = fdprintf(important_artist_fd, "%s\n", first_artist);
+                if (!result)
+                    logf("Could not append an artists to important_artists.txt file\n");
+            } else {
+                char *all_artists = id3.artist;
+                char *current_artist;
+                bool first_artist = true;
 
-            while ((current_artist = strtok_r(all_artists, ",", &all_artists)))
-            {
-                if (current_artist[0] == ' ')
-                    current_artist++;
-                id3.artist = current_artist;
-                id3.important_artist = is_important_artist(current_artist) ? "y" : "n";
-
-                if (!first_artist)
+                while ((current_artist = strtok_r(all_artists, ",", &all_artists)))
                 {
-                    id3.tracknum = -1;
-                    id3.year = 0;
-                    id3.discnum = 0;
-                    id3.album = NULL;
-                    id3.genre_string = NULL;
-                    id3.composer = NULL;
-                    id3.albumartist = NULL;
-                    id3.grouping = NULL;
+                    if (current_artist[0] == ' ')
+                        current_artist++;
+                    id3.artist = current_artist;
+                    id3.important_artist = is_important_artist(current_artist) ? "y" : "n";
+
+                    if (!first_artist)
+                    {
+                        id3.tracknum = -1;
+                        id3.year = 0;
+                        id3.discnum = 0;
+                        id3.album = NULL;
+                        id3.genre_string = NULL;
+                        id3.composer = NULL;
+                        id3.albumartist = NULL;
+                        id3.grouping = NULL;
+                    }
+
+                    /* Add a new entry to the temporary db file. */
+                    add_tagcache(curpath, info.mtime, &id3);
+
+                    first_artist = false;
                 }
-
-                /* Add a new entry to the temporary db file. */
-                add_tagcache(curpath, info.mtime, &id3);
-
-                first_artist = false;
             }
 
             /* Wait until current path for debug screen is read and unset. */
@@ -5015,50 +5022,6 @@ void tagcache_screensync_event(void)
 void tagcache_screensync_enable(bool state)
 {
     tc_stat.syncscreen = state;
-}
-
-void recursive_important_artist_search(int fd, const char *path)
-{
-    DIR *dir = opendir(path);
-    if (!dir)
-    {
-        return;
-    }
-
-    struct dirent *entry;
-    while ((entry = readdir (dir)) != NULL)
-    {
-        /* check if file is the . or .. directory or a hidden directory */
-        if (strncmp(entry->d_name, ".", strlen(".")) == 0)
-            continue;
-
-        struct dirinfo info = dir_get_info(dir, entry);
-
-        /* create full_path to the file/directory */
-        char full_path[TAGCACHE_BUFSZ];
-        strmemccpy(full_path, path, sizeof(full_path));
-        size_t len = strlen(curpath);
-        path_append(full_path, PA_SEP_HARD, entry->d_name, sizeof(full_path) - len);
-
-        /* start recursion if current path is a directory */
-        if (info.attribute & ATTR_DIRECTORY)
-        {
-            recursive_important_artist_search(fd, full_path);
-            continue;
-        }
-
-        struct mp3entry id3;
-        bool ret = get_metadata_ex(&id3, -1, full_path, METADATA_EXCLUDE_ID3_PATH);
-        if (!ret)
-            continue;
-
-        char* first_artist = strtok_r(id3.artist, ",", &id3.artist);
-        int result = fdprintf(fd, "%s\n", first_artist);
-        if (!result)
-            logf("Could not append an artists to important_artists.txt file\n");
-    }
-
-    closedir(dir);
 }
 
 #ifndef __PCTOOL__
@@ -5174,7 +5137,8 @@ void do_tagcache_build(const char *path[])
     for(this = &roots_ll[0]; this; this = this->next)
     {
         logf("important artists search root %s", this->path);
-        recursive_important_artist_search(fd, this->path);
+        strmemccpy(curpath, this->path, sizeof(curpath));
+        check_dir(this->path, true, fd);
     }
     close(fd);
 
@@ -5184,7 +5148,7 @@ void do_tagcache_build(const char *path[])
     {
         logf("Search root %s", this->path);
         strmemccpy(curpath, this->path, sizeof(curpath));
-        ret = ret && check_dir(this->path, true);
+        ret = ret && check_dir(this->path, true, false);
     }
     free_search_roots(&roots_ll[0]);
 
